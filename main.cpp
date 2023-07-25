@@ -1,68 +1,70 @@
-﻿#define NOMINMAX 
+﻿#define _CRT_SECURE_NO_WARNINGS
+
 #include <iostream>
-#include <locale>
-#include <limits>
-#include <sstream>
-#include "LoaderJsonData.hpp"
+#include <string>
+#include <chrono>
+#include <format>
+#include <cpr/cpr.h>
+#include <utility>
+#include <stdexcept>
+#include <filesystem>
 
-int main() 
+void downloadFile(const std::chrono::local_seconds& date) {
+    std::string requestLink =
+        std::format("http://dbrobo.mgul.ac.ru/core/deb.php?fdate={:%Y-%m-%d}+09%3A00%3A00&sdate={:%Y-%m-%d}+16%3A45%3A00&fileback=1", date, date);
+    cpr::Response dataDownload = cpr::Get(cpr::Url{requestLink});
+    cpr::Response data = cpr::Get(cpr::Url{"http://dbrobo.mgul.ac.ru/export/log.txt"});
+    std::ofstream file(std::format("data\\{:%Y.%m.%d}.json", date), std::ios::binary);
+    file.write(data.text.c_str(), data.text.length());
+    file.close();
+}
+
+std::chrono::local_seconds parseTime(const std::string& timeString)
 {
-	std::setlocale(LC_ALL, "");
+    std::chrono::local_seconds timeStamp;
+    std::stringstream iss(timeString);
+    if (not (iss >> std::chrono::parse("%Y %m %d", timeStamp)))
+        throw std::invalid_argument("incorrect time");
+    return timeStamp;
+}
 
-	char answ;
-	do {
-		std::cout << "1) Download data in one day" << std::endl;
-		std::cout << "2) Download data for a period of time" << std::endl;
-		std::cin >> answ;
-
-		std::cin.clear();
-		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-	} while (answ != '1' && answ != '2');
-
-	if (answ == '1')
-	{
-		std::cout << "Enter date [DD MM YYYY]" << std::endl;
-		std::string timeString;
-		std::istringstream iss;
-		std::tm timeStruct;
-		do {
-			std::getline(std::cin, timeString);
-			iss.str(timeString);
-			iss >> std::get_time(&timeStruct, "%d %m %y");
-
-			if (iss.fail())
-			{
-				std::cout << "Incorrect time format, try again" << std::endl;
-				iss.clear();
-			}
-		} while (iss.fail());
-
-		LoaderJsonData::load(timeStruct);
-	}
-
-// int argc, char* argv[]
-int main() 
+std::pair<std::chrono::local_seconds, std::chrono::local_seconds> parseInterval(const std::string& startTime, const std::string& endTime)
 {
-	int argc = 3;
-	const char* argv[] = { "SoundParser", "log.json", "table.xls"};
-	if (!checkCountArguments(argc))
-		return 1;
+    return std::pair<std::chrono::local_seconds, std::chrono::local_seconds>(parseTime(startTime), parseTime(endTime));
+}
 
-	/*std::shared_ptr<std::ifstream> inFile = std::make_shared<std::ifstream>(std::ifstream(argv[1]), [](std::ifstream& file) {
-		file.close();
-		});*/
-	std::ifstream inFile(argv[1]);
+int main() {
+    setlocale(LC_ALL, "RU");
 
-	if (!checkFileIsOpen(inFile, argv[1])) 
-		return 2;
+    std::string startTimeString, endTimeString;
+    std::cout << "Enter time format [YYYY MM DD]" << std::endl;
+    std::getline(std::cin, startTimeString);
+    std::cout << "Enter time format [YYYY MM DD]" << std::endl;
+    std::getline(std::cin, endTimeString);
+    auto interval = parseInterval(startTimeString, endTimeString);
 
-	int serialNum = getSerialNumberDevice();
-	if (serialNum == -1)
-		return 3;
+    system("cls");
+    std::cout << std::format("Start time: {:%Y-%m-%d %T}", interval.first) << std::endl;
+    std::cout << std::format("End time {:%Y-%m-%d %T}", interval.second) << std::endl;
 
-	parse(inFile, serialNum);
+    if (not std::filesystem::is_directory("data"))
+        std::filesystem::create_directory("data");
 
-	inFile.close();
+    interval.second += std::chrono::days(1);
+    auto currentDay = interval.first;
 
-	return 0;
+    do {
+        // file exists
+        if (std::filesystem::exists(std::format("data\\{:%Y.%m.%d}.json", currentDay)))
+        {
+            std::cout << std::format("file data\\{:%Y.%m.%d}.json already exists. skip ...", currentDay) << std::endl;
+            continue;
+        }
+
+        std::cout << std::format("Donwload file data\\{:%Y.%m.%d}.json ...", currentDay) << std::endl;
+        downloadFile(currentDay);
+        currentDay += std::chrono::days(1);
+    } while (currentDay < interval.second);
+
+    return 0;
 }
